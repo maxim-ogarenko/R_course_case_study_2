@@ -1,0 +1,521 @@
+---
+title: "УЧЕБНЫЙ ПРОЕКТ 2 (ДРАФТ)"
+author: "Maxim Ogarenko"
+date: '2 December 2018'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+##Учебный проект 2
+
+#Задача проекта
+Вы - вновь назначенный менеджер по России китайской фастфудной сети. Вам поручено подготовит предложение по выходу на российский рынок. На данном этапе от Вас ждут отчёта по сравнительной привлекательности кластеров страны для открытия.
+
+Под кластером понимается нескольких близлежащих областей, связанных автодорогами. До столиц других областей, входящих в кластер, должно быть не более 500 км от штаб квартиры по автодороге.
+
+Целевой потребитель сети - городской житель с доходом от 45 тыс. руб. Под размером рынка кластера подразумевается количество целевых потребителей. Ваш центральный офис не будет рассматривать никакие кластеры, где живёт менее 0.5 млн целевых потребителей.
+
+Отчёт должен содержать рейтинг кластеров с указанием (а) расположения штаб-квартиры, (б) размера рынка, (г) средней зарплаты. Перечень кластеров должен быть отсортирован по убыванию размеры рынка. Средняя зарплата кластера должна определяться как средневзвешенная от городского населения входящих в кластер областей. Перечень областей кластера должен быть раскрыт в дополнительной справке.
+
+Отчёт должен содержать минимальную визуализацию данных.
+
+
+#Доступные данные
+У Вас нет бюджета на покупку подготовленной аналитики, и поэтому Вы вынуждены пользоваться данными из открытых источников.
+
+Вы нашли:
+
+(а) Базу данных Сбербанка [Открытые данные](http://sbrfdata.ru/opendata.zip). В этой базе есть надёжные данные о среднем чеке в формате фастфуд помесячно с начала 2013 г. Нас интересует средний показатель за 2017-2018 г.г. 
+
+(б) Численность занятых по областям, распределение населения на городское и сельское и распределение населения по величине доходов выложено в [БД Федеральной службы государственной статистики](http://www.gks.ru/bgd/regl/b17_14p/Main.htm). В этом источнике данные содержатся в Word, и поэтому Вы попросили своего коллегу перевести их в формат csv.  
+
+(в) Таблица расстояний по автомобильным дорогам между городами России выложена [здесь](https://www.avtodispetcher.ru/_img/distance/table.russia.xls). 
+
+(г) Файл с перечнем субъектов РФ с их столицами выложен здесь ***. 
+
+Вы столкнётесь с разными названиями регионов в разных базах. Приведите все названия к содержащимся в файле с субъектами РФ. 
+
+Некоторые города имеют статус субъектов РФ (Москва, СПб). Объединяйте их показатели с показателями соответствующих областей.
+
+Также, некоторые субъекты РФ входят в состав других: в Архангельскую область входит Ненецкий автономный округ, а в Тюменскую - Ханты-Мансийский автономный округ – Югра и Ямало-Ненецкий автономные округа. Рассматривайте Архангельскую и Тюменскую области вместе с входящими в них субъектами. 
+
+Не все регионы РФ доступны по автодорогам. Не рассматривайте никакие области, чьи столицы отсутствуют в таблице автодорог.
+
+
+#Подготовка данных от Сбербанка
+```{r dplyr, include=FALSE}
+library(dplyr)
+```
+
+Создадим и установим как рабочую папку под названием Lesson2. Скачаем в неё все соответствующий файл. Распакуем архив. Посмотрим на файл в папке. 
+
+Изучим предварительно получившуюся таблицу с помощью str().
+```{r sber download, echo=FALSE}
+if(!file.exists("Lesson2")) dir.create("C:/Users/Admin/Documents/myRcourse/Lesson2")
+setwd("C:/Users/Admin/Documents/myRcourse/Lesson2")
+
+sber_url <- "http://sbrfdata.ru/opendata.zip"
+if(!file.exists("opendata.rar")) download.file(sber_url,"opendata.rar")
+#unzip("opendata.rar")
+sber <- read.csv("opendata.csv")
+str(sber)
+```
+
+Сократим показатели таблицы до среднего чека в фастфуде за период - до 2017-2018 г.г. Посмотрим на получившуюся таблицу с помощью head() и tail().
+```{r sber wrangling, echo=FALSE}
+sber <- filter(sber, name=="Средний чек в формате Фастфуд")
+sber$date <- format(as.Date(sber$date), format = "%Y")
+sber <- filter(sber, date %in% c(2017, 2018))
+sber <- group_by(sber, region)
+sber <- summarize(sber, cheque=round(mean(value), 0))
+head(sber)
+```
+Подсказка: в БД Сбербанка все показатели по Архангельской и Тюменской областям приведены без входящих в них субъектов РФ. Мы займёмся этой проблемой позже. 
+
+
+#Совмещение БД Сбербанка и таблицы субъектов РФ
+Откроем и изучим таблицу субъектов РФ. Посмотрим на перечень названий регионов.
+```{r regions, echo=FALSE}
+regions <- read.csv("Субъекты РФ.csv", header = TRUE, sep = ";")
+colnames(regions) <- c("region", "city")
+str(regions)
+sort(regions$region)
+```
+Мы будем использовать эту номенклатуру для объединения всех таблиц. 
+
+Посмотрим на перечень названий регионов в БД Сбербанка:
+```{r sber regions, echo=FALSE}
+sort(sber$region)
+```
+
+Мы видим следующие расхождения:
+
+1) в БД Сбербанка нацреспублики назваются как "Республика Адыгея", а в таблице субъектов - как "Адыгея"
+
+2) Автономные округа и автономные области написаны целиком, а в таблице субъектов - как "АО"
+
+3) Горный Алтай в Сбербанке значится как "Алтай (Горный Алтай)", а в таблице - как "Алтай"
+
+4) в Сбербанке написано "Северная Осетия-Алания", а в таблице - "Северная Осетия — Алания"
+
+4) в слове "Черкесия" в БД Сбербанка допущена ошибка.
+
+Следующий код приводит названия регионов в sber к номенклатуре в regions.
+```{r sber regions cleaning, echo=FALSE}
+sber$region <- gsub("Республика ", '', sber$region, fixed = TRUE)
+sber$region <- gsub("автономный округ", "АО", sber$region, fixed = TRUE)
+sber$region <- gsub("автономная область", "АО", sber$region, fixed = TRUE)
+sber$region <- gsub("Алтай (Горный Алтай)", "Алтай", sber$region, fixed = TRUE)
+sber$region <- gsub("^Кабардино.*", "Кабардино-Балкария", sber$region, fixed = FALSE)
+sber$region <- gsub("Черкессия", "Черкесия", sber$region, fixed = TRUE)
+sber$region <- gsub("^Северная Осетия.*", "Северная Осетия — Алания", sber$region, 
+                    fixed = FALSE)
+sber$region <- gsub("^Удмуртская.*", "Удмуртия", sber$region, fixed = FALSE)
+sber$region <- gsub("^Чеченская.*", "Чечня", sber$region, fixed = FALSE)
+sber$region <- gsub("^Чувашская.*", "Чувашия", sber$region, fixed = FALSE)
+sber$region <- trimws(sber$region)
+```
+
+Проверим, остались ли названия регионов в sber, отсутствующие в regions.
+```{r sber and regions mapping, echo=FALSE}
+no_map <- sber$region[which(!sber$region %in% regions$region)]
+no_map
+```
+
+Нет, не остались (Россия - это сводный показатель по стране). 
+
+Объединим эти две таблицы и посмотрим, что получилось.
+```{r sber and regions merge, echo=FALSE}
+sber <- merge(sber, regions, by = 'region')
+head(sber)
+```
+Теперь данные от Сбербанка дополнены столицей региона, что позволит проводить расчёты расстояний между областями.
+
+
+#Подготовка данных от ФСГС
+Прочитаем таблицу с количеством занятых по областям. Нас интересуют данные только за 2016 г - сократим таблицу соответствующим образом. Посмотрим, что получилось.
+```{r working populaton, echo=FALSE}
+population <- read.csv("Численность занятых.csv", skip = 2, 
+                       header = TRUE, sep = ";", dec = ",")
+population <- population[, c(1, 9)]
+colnames(population) <- c("region", "population")
+str(population)
+head(population, 30)
+```
+Мы видим, что под записью "Архангельская область" можно прочитать данные как без Ненецкого АО, так и с ним. Аналогичная проблема - с Тюменской областью.
+
+Удалим из таблицы строки с указанными двумя областями, включающими АО.При этом номера соответствующих строк мы определим автоматически. 
+```{r inclusion problem 1, echo=FALSE}
+included_lines <- which(population$region=="в том числе: "| 
+                                population$region=="в том числе:")-1
+
+population <- population[-included_lines, ]
+```
+
+Теперь скачаем и обработаем таблицу с распредедением населения на городское и сельское.
+```{r urban, echo=FALSE}
+urban <- read.csv("Доля городского населения.csv", skip = 4, 
+                  header = TRUE, sep = ";", dec = ",")
+urban <- urban[, c(1, 8)]
+colnames(urban) <- c("region", "urban_population")
+str(urban)
+```
+
+Уберём строки, содержащие данные Архангельской и Тюменской областей с включением АО.
+```{r inclusion problem 2, echo=FALSE}
+included_lines <- which(urban$region=="в том числе: "| 
+                                urban$region=="в том числе:")-1
+urban <- urban[-included_lines, ]
+```
+
+Теперь скачаем и обработаем точно так же таблицу с распредедением по величине доходов.
+```{r income strata, echo=FALSE}
+income_strata <- read.csv("Распределение по величине доходов.csv", skip = 6, 
+                          header = FALSE, sep = ";", dec = ",")
+income_strata <- income_strata[, c(1, 8, 9)]
+colnames(income_strata) <- c("region", "from_45", "above_60")
+income_strata <- mutate(income_strata, target_income = from_45 + above_60)
+income_strata <- select(income_strata, region, target_income)
+str(income_strata)
+```
+
+Уберём из неё строки, содержащие данные Архангельской и Тюменской областей с включением АО.
+```{r inclusion problem 3, echo=FALSE}
+included_lines <- which(income_strata$region=="в том числе: "| 
+                                income_strata$region=="в том числе:")-1
+income_strata <- income_strata[-included_lines, ]
+```
+
+
+#Мэппинг трёх таблиц из ФСГС c БД Сбербанка
+Запустим код, приводящий номенклатуру регионов ФСГС к нашей основной. Основная часть кода будет скопирована из соответствующего раздела подготовки таблицы Сбербанка.
+
+Начнём с population.
+```{r population cleaning, echo=FALSE}
+population$region <- gsub("Республика ", "", population$region, fixed = TRUE)
+population$region <- gsub("автономный округ", "АО", population$region, fixed = TRUE)
+population$region <- gsub("автономная область", "АО", population$region, fixed = TRUE)
+population$region <- gsub("Алтай (Горный Алтай)", "Алтай", population$region, fixed = TRUE)
+population$region <- gsub("^Кабардино.*", "Кабардино-Балкария", population$region, fixed = FALSE)
+population$region <- gsub("Черкессия", "Черкесия", population$region, fixed = TRUE)
+population$region <- gsub("^Северная Осетия.*", "Северная Осетия — Алания", population$region, 
+                          fixed = FALSE)
+population$region <- gsub("^Удмуртская.*", "Удмуртия", population$region, fixed = FALSE)
+population$region <- gsub("^Чеченская.*", "Чечня", population$region, fixed = FALSE)
+population$region <- gsub("^Чувашская.*", "Чувашия", population$region, fixed = FALSE)
+population$region <- gsub("г.", "", population$region, fixed = TRUE)
+population$region <- trimws(population$region)
+
+population$region <- gsub("^Ханты.*", "Ханты-Мансийский АО — Югра", 
+                          population$region, fixed = FALSE)
+population$region <- gsub("^Карачаево.*", "Карачаево-Черкесия", 
+                          population$region, fixed = FALSE)
+```
+
+Совместим таблицы sber и population. Проверим предварительно, есть ли потерянные строки из sber.
+```{r population mapping, echo=FALSE}
+no_map <- sber$region[which(!sber$region %in% population$region)]
+no_map
+```
+Потерянных строк нет.
+
+``` {r total population merge, echo=FALSE}
+total <- merge(sber, population, by = 'region')
+head(total)
+```
+
+Повторим эти операции для urban.
+```{r urban cleaning and mapping, echo=FALSE}
+urban$region <- gsub("Республика ", "", urban$region, fixed = TRUE)
+urban$region <- gsub("автономный округ", "АО", urban$region, fixed = TRUE)
+urban$region <- gsub("автономная область", "АО", urban$region, fixed = TRUE)
+urban$region <- gsub("Алтай (Горный Алтай)", "Алтай", urban$region, fixed = TRUE)
+urban$region <- gsub("^Кабардино.*", "Кабардино-Балкария", urban$region, fixed = FALSE)
+urban$region <- gsub("Черкессия", "Черкесия", urban$region, fixed = TRUE)
+urban$region <- gsub("^Северная Осетия.*", "Северная Осетия — Алания", urban$region, 
+                     fixed = FALSE)
+urban$region <- gsub("^Удмуртская.*", "Удмуртия", urban$region, fixed = FALSE)
+urban$region <- gsub("^Чеченская.*", "Чечня", urban$region, fixed = FALSE)
+urban$region <- gsub("^Чувашская.*", "Чувашия", urban$region, fixed = FALSE)
+urban$region <- gsub("г.", "", urban$region, fixed = TRUE)
+urban$region <- trimws(urban$region)
+
+urban$region <- gsub("^Ханты.*", "Ханты-Мансийский АО — Югра", 
+                     urban$region, fixed = FALSE)
+urban$region <- gsub("^Карачаево.*", "Карачаево-Черкесия", 
+                     urban$region, fixed = FALSE)
+urban$region <- gsub("^Еврейская.*", "Еврейская АО", urban$region, fixed = FALSE)
+urban$region <- gsub("^Ямало.*", "Ямало-Ненецкий АО", urban$region, fixed = FALSE)
+
+no_map <- total$region[which(!total$region %in% urban$region)]
+no_map
+```
+Потерянных строк также нет.
+
+```{r total urban merge, echo=FALSE}
+total <- merge(total, urban, by = "region")
+head(total)
+```
+
+Повторим эти операции для income_strata.
+```{r income_strata cleaning and mapping, echo=FALSE}
+income_strata$region <- gsub("Республика ", "", income_strata$region, fixed = TRUE)
+income_strata$region <- gsub("автономный округ", "АО", income_strata$region, fixed = TRUE)
+income_strata$region <- gsub("автономная область", "АО", income_strata$region, fixed = TRUE)
+income_strata$region <- gsub("Алтай (Горный Алтай)", "Алтай", income_strata$region, fixed = TRUE)
+income_strata$region <- gsub("^Кабардино.*", "Кабардино-Балкария", income_strata$region, fixed = FALSE)
+income_strata$region <- gsub("Черкессия", "Черкесия", income_strata$region, fixed = TRUE)
+income_strata$region <- gsub("^Северная Осетия.*", "Северная Осетия — Алания", income_strata$region, 
+                             fixed = FALSE)
+income_strata$region <- gsub("^Удмуртская.*", "Удмуртия", income_strata$region, fixed = FALSE)
+income_strata$region <- gsub("^Чеченская.*", "Чечня", income_strata$region, fixed = FALSE)
+income_strata$region <- gsub("^Чувашская.*", "Чувашия", income_strata$region, fixed = FALSE)
+income_strata$region <- gsub("г.", "", income_strata$region, fixed = TRUE)
+income_strata$region <- trimws(income_strata$region)
+
+income_strata$region <- gsub("^Ханты.*", "Ханты-Мансийский АО — Югра", 
+                             income_strata$region, fixed = FALSE)
+income_strata$region <- gsub("^Карачаево.*", "Карачаево-Черкесия", 
+                             income_strata$region, fixed = FALSE)
+income_strata$region <- gsub("^Еврейская.*", "Еврейская АО", income_strata$region, 
+                             fixed = FALSE)
+income_strata$region <- gsub("^Ямало.*", "Ямало-Ненецкий АО", income_strata$region, 
+                             fixed = FALSE)
+income_strata$region <- gsub("^Ямало.*", "Ямало-Ненецкий АО", income_strata$region, 
+                             fixed = FALSE)
+income_strata$region <- gsub("^Тюменская.*", "Тюменская область", income_strata$region, 
+                             fixed = FALSE)
+
+no_map <- total$region[which(!total$region %in% income_strata$region)]
+no_map
+```
+Потерянных строк нет.
+
+```{r total income merge, echo=FALSE}
+total <- merge(total, income_strata, by = "region")
+head(total)
+```
+
+Оставим в total только нужные столбцы. 
+```{r total column transform, echo=FALSE}
+total <- mutate(total, market = round(population*urban_population/100*target_income/100, 1))
+total <- select(total, region, city, population, market, cheque)
+head(total)
+```
+
+Включим Москву и СПб в соответствующие области. Объединим Архангельскую и Тюменскую области с соответствующими АО. Посмотрим на получившуюся таблицу.
+```{r total wrangling, echo=FALSE}
+moscow <- which(total$region=="Москва")
+moscow_reg <- which(total$region=="Московская область")
+spb <- which(total$region=="Санкт-Петербург")
+lenobl <- which(total$region=="Ленинградская область")
+arkhangel <- which(total$region=="Архангельская область")
+nenets <- which(total$region=="Ненецкий АО")
+tyumen <- which(total$region=="Московская область")
+yamal <- which(total$region=="Ямало-Ненецкий АО")
+khanty <- which(total$region=="Ханты-Мансийский АО — Югра")
+
+total[moscow_reg, "population"] <- total[moscow_reg, "population"] + 
+        total[moscow, "population"]
+total[lenobl, "population"] <- total[spb, "population"] + total[lenobl, "population"]
+total[arkhangel, "population"] <- total[arkhangel, "population"] + total[nenets, "population"]
+total[tyumen, "population"] <- total[tyumen, "population"] + total[yamal, "population"] + 
+        total[khanty, "population"]
+
+total[moscow_reg, "market"] <- total[moscow_reg, "market"] + total[moscow, "market"]
+total[lenobl, "market"] <- total[spb, "market"] + total[lenobl, "market"]
+total[arkhangel, "market"] <- total[arkhangel, "market"] + total[nenets, "market"]
+total[tyumen, "market"] <- total[tyumen, "market"] + total[yamal, "market"] + 
+        total[khanty, "market"]
+
+moscow_share <- total[moscow, "population"] / 
+        (total[moscow, "population"] + total[moscow_reg, "population"])
+moscow_reg_share <- total[moscow_reg, "population"] / 
+        (total[moscow, "population"] + total[moscow_reg, "population"])
+
+spb_share <- total[spb, "population"] / 
+        (total[spb, "population"] + total[lenobl, "population"])
+lenobl_share <- total[lenobl, "population"] / 
+        (total[spb, "population"] + total[lenobl, "population"])
+
+arkhangel_share <- total[arkhangel, "population"] / 
+        (total[arkhangel, "population"] + total[nenets, "population"])
+nenets_share <- total[nenets, "population"] / 
+        (total[arkhangel, "population"] + total[nenets, "population"])
+
+tyumen_share <- total[tyumen, "population"] / 
+        (total[tyumen, "population"] + total[yamal, "population"] + 
+                 total[khanty, "population"])
+yamal_share <- total[yamal, "population"] / 
+        (total[tyumen, "population"] + total[yamal, "population"] + 
+                 total[khanty, "population"])
+khanty_share <- total[khanty, "population"] / 
+        (total[tyumen, "population"] + total[yamal, "population"] + 
+                 total[khanty, "population"])
+
+total[moscow_reg, "cheque"] <- total[moscow_reg, "cheque"]*moscow_reg_share + 
+        total[moscow, "cheque"]*moscow_share
+total[lenobl, "cheque"] <- total[lenobl, "cheque"]*lenobl_share + 
+        total[spb, "cheque"]*spb_share
+total[arkhangel, "cheque"] <- total[arkhangel, "cheque"]*arkhangel_share + 
+        total[nenets, "cheque"]*nenets_share
+total[tyumen, "cheque"] <- total[tyumen, "cheque"]*tyumen_share + 
+        total[yamal, "cheque"]*yamal_share + 
+        total[khanty, "cheque"]*khanty_share
+
+total <- total[-c(moscow, spb, nenets, yamal, khanty), ]
+
+total <- arrange(total, -market)
+
+str(total)
+head(total, 15)
+```
+
+
+##Формирование итогового отчета
+
+#Сверка городов total и distance
+Прочитаем файл с матрицей расстояний между городами России. Посмотрим на неё.
+``` {r distance read, echo=FALSE}
+distance <- read.csv("distance.csv", skip = 1, sep = ";", na.strings = " ")
+colnames(distance) <- c("city", as.character(distance$city))
+str(distance)
+```
+
+Проверим, все ли города из total есть в distance.
+``` {r distance mapping, echo=FALSE}
+no_map <- total$city[which(!total$city %in% distance$city)]
+no_map
+```
+Как мы видим, проблема в данном случае не связана с орфографией - эти города действительно отсутствуют в distance.
+
+#Формирование кластеров
+Сформируем перечень кластеров.
+
+Для этого используем цикл, (а) выбирающий один за другим город из total, (б) выбирающий для него города, удалённые не более чем на 500 км, (в) исключающий из этого списка города, не входящие в total (то есть не являющиеся столицами регионов), (г) "подтягивающий" для каждого города из кластера его население, рынок, средний чек в фастфуде и название региона. Пункт "г" осуществляется во вложенном цикле. 
+
+Сформируем таблиццу, в которой приведены города - штаб квартиры, города кластера и соответствующие данные о населении, рынке, чеке и регионе. 
+
+Посмотрим на получившуюся таблицу.
+```{r clusters, echo=FALSE}
+report <- NULL
+
+for (i in 1:nrow(total)) {
+        HQ <- as.character(total$city[i])
+        proximity <- filter(distance, city == HQ)
+        proximity <- proximity[HQ, which(proximity %in% c(1:500))]
+        proximity_list <- colnames(proximity)
+        proximity_list <- proximity_list[which(proximity_list %in% total$city)]
+        cluster <- c(HQ, proximity_list)
+        
+        city_population <- vector()
+        city_market <- vector()
+        city_cheque <- vector()
+        city_region <- vector()
+        
+        for (n in seq_along(cluster)) {
+                city_population[n] <- total$population[which(total$city==cluster[n])] 
+                city_market[n] <- total$market[which(total$city==cluster[n])] 
+                city_cheque[n] <- total$cheque[which(total$city==cluster[n])]
+                city_region[n] <- total$region[which(total$city==cluster[n])]
+                }
+
+        cluster_entry <- data.frame(HQ, cluster, city_population, city_market, 
+                             city_cheque, city_region)
+        
+        report <- rbind(report, cluster_entry)
+}
+str(report)
+tail(report)
+```
+
+Проверим, все ли города из total представлены в report.
+```{r total report mapping, echo=FALSE}
+no_map <- total$city[!which(total$city %in% report$HQ)]
+no_map
+```
+Да, все города вошли.
+
+
+#Формирование отчёта 
+Подготовим отчёт, группирующий предыдущую таблицу по городам - штаб квартирам. Отсортируем её по убыванию размера рынка. Отсечём кластеры с рынком менее 0.5 млн потребителей. Выведем эту таблицу.
+``` {r report, echo=FALSE}
+report_fin <- group_by(report, HQ)
+report_fin <- summarise(report_fin, population=sum(city_population), 
+                    market=sum(city_market), 
+                    cheque=round(weighted.mean(city_cheque, city_population), 0))
+report_fin <- select(report_fin, -population)
+report_fin <- arrange(report_fin, -market)
+report_fin <- filter(report_fin, market >= 500)
+report_fin <- as.data.frame(report_fin)
+
+"Кластеры регионов, ранжированные по размеру рынка"
+report_fin
+paste("В мой отчёт попали", nrow(report_fin), "кластеров.")
+```
+
+Из таблицы выше видно, что кластеры, включающие Москву, настолько доминируют, что затрудняют сопоставление. Создадим две гистограммы кластеров по размеру рынка: включающих и не включающих Москву. 
+``` {r barplot market, echo=FALSE}
+par(mar=c(7,4,2,1))
+report_msk <- filter(report_fin, market>=5000)
+barplot(height = report_msk$market, 
+        names.arg = report_msk$HQ, 
+        ylim = c(0, 7000),
+        ylab = "Размер рынка, тыс. потребителей", 
+        cex.names = 0.8,
+        las = 2, 
+        main = "Размер рынка по московским кластерам",
+        col = 'blue')
+```
+
+``` {r barplot market no msk, echo=FALSE}
+report_no_msk <- filter(report_fin, market<5000)
+par(mar=c(7,4,2,1))
+barplot(height = report_no_msk$market, 
+        names.arg = report_no_msk$HQ, 
+        ylim = c(0, 1200),
+        ylab = "Размер рынка, тыс. потребителей", 
+        cex.names = 0.8,
+        las = 2, 
+        main = "Размер рынка по немосковским кластерам",
+        col = 'blue')
+```
+
+Покажем размер среднего чека по всем кластерам.  
+``` {r barplot cheque, echo=FALSE, echo=FALSE}
+par(mar=c(7,4,2,1))
+barplot(height = report_fin$cheque, 
+        names.arg = report_fin$HQ, 
+        cex.names = 0.7,
+        las = 2, 
+        ylab = "Средний чек", 
+        main = "Средний чек в формате фастфуд",
+        col = 'blue')
+```
+
+Сформируем гистограмму распределения среднего чека по всем областям России.
+```{r hist cheque, echo=FALSE}
+par(mar=c(7,4,2,1))
+hist(total$cheque, main = "Распределение чека по всем регионам",
+     xlab = "Средний чек в формате фастфуд",
+     ylab = "Частота",
+     col = 'blue')
+```
+
+Добавим справку, какие регионы входят в тот или иной кластер.
+``` {r cluster composition, echo=FALSE}
+"Справка по составу кластеров регионов"
+for (i in seq_along(report_fin$HQ)) {
+        regions <- report$city_region[which(report$HQ==report_fin$HQ[i])]
+        print(paste("Кластер", i))
+        print(paste("Штаб-квартира", report_fin$HQ[i]))
+        print(paste("Включает", length(regions), "регионов:", 
+                    paste(regions, collapse = ", ")))
+        print("")
+        print("")
+}
+
+```
