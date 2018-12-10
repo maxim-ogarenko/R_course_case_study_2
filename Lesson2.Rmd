@@ -63,6 +63,7 @@ sber <- filter(sber, date %in% c(2017, 2018))
 sber <- group_by(sber, region)
 sber <- summarize(sber, cheque=round(mean(value), 0))
 head(sber)
+tail(sber)
 ```
 Подсказка: в БД Сбербанка все показатели по Архангельской и Тюменской областям приведены без входящих в них субъектов РФ. Мы займёмся этой проблемой позже. 
 #Совмещение БД Сбербанка и таблицы субъектов РФ
@@ -98,6 +99,7 @@ sber$region <- gsub("^Удмуртская.*", "Удмуртия", sber$region, 
 sber$region <- gsub("^Чеченская.*", "Чечня", sber$region, fixed = FALSE)
 sber$region <- gsub("^Чувашская.*", "Чувашия", sber$region, fixed = FALSE)
 sber$region <- trimws(sber$region)
+#вот тут логичнее вывести еще раз список посмотреть
 ```
 Проверим, остались ли названия регионов в sber, отсутствующие в regions.
 ```{r sber and regions mapping, echo=FALSE}
@@ -114,7 +116,7 @@ head(sber)
 #Подготовка данных от ФСГС
 Прочитаем таблицу с количеством занятых по областям. Нас интересуют данные только за 2016 г - сократим таблицу соответствующим образом. Посмотрим, что получилось.
 ```{r working populaton, echo=FALSE}
-population <- read.csv("Численность занятых.csv", skip = 2, 
+population <- read.csv("Численность занятых.csv", skip = 2, fileEncoding="cp1251", 
                        header = TRUE, sep = ";", dec = ",")
 population <- population[, c(1, 9)]
 colnames(population) <- c("region", "population")
@@ -130,7 +132,7 @@ population <- population[-included_lines, ]
 ```
 Теперь скачаем и обработаем таблицу с распредедением населения на городское и сельское.
 ```{r urban, echo=FALSE}
-urban <- read.csv("Доля городского населения.csv", skip = 4, 
+urban <- read.csv("Доля городского населения.csv", skip = 4, fileEncoding="cp1251",
                   header = TRUE, sep = ";", dec = ",")
 urban <- urban[, c(1, 8)]
 colnames(urban) <- c("region", "urban_population")
@@ -144,8 +146,7 @@ urban <- urban[-included_lines, ]
 ```
 Теперь скачаем и обработаем точно так же таблицу с распредедением по величине доходов.
 ```{r income strata, echo=FALSE}
-income_strata <- read.csv("Распределение по величине доходов.csv", skip = 6, 
-                          header = FALSE, sep = ";", dec = ",")
+income_strata <- read.csv("Распределение по величине доходов.csv", skip = 6, fileEncoding="cp1251", header = FALSE, sep = ";", dec = ",")
 income_strata <- income_strata[, c(1, 8, 9)]
 colnames(income_strata) <- c("region", "from_45", "above_60")
 income_strata <- mutate(income_strata, target_income = from_45 + above_60)
@@ -256,6 +257,7 @@ head(total)
 ```
 Оставим в total только нужные столбцы. 
 ```{r total column transform, echo=FALSE}
+#urban_population ?? не вижу где ты создаешь эту переменную
 total <- mutate(total, market = round(population*urban_population/100*target_income/100, 1))
 total <- select(total, region, city, population, market, cheque)
 head(total)
@@ -321,7 +323,7 @@ head(total, 15)
 #Сверка городов total и distance
 Прочитаем файл с матрицей расстояний между городами России. Посмотрим на неё.
 ``` {r distance read, echo=FALSE}
-distance <- read.csv("distance.csv", skip = 1, sep = ";", na.strings = " ")
+distance <- read.csv("distance.csv", skip = 1, sep = ";", na.strings = " ", fileEncoding="cp1251")
 colnames(distance) <- c("city", as.character(distance$city))
 str(distance)
 ```
@@ -433,6 +435,7 @@ hist(total$cheque, main = "Распределение чека по всем р�
 Добавим справку, какие регионы входят в тот или иной кластер.
 ``` {r cluster composition, echo=FALSE}
 "Справка по составу кластеров регионов"
+# @Андрей, это не лучше писать в файл отчет?
 for (i in seq_along(report_fin$HQ)) {
         regions <- report$city_region[which(report$HQ==report_fin$HQ[i])]
         print(paste("Кластер", i))
